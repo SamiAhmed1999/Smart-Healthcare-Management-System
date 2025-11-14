@@ -1,0 +1,744 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Healthcare Data Management Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        /* Custom styles for smooth scrolling and clean look */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f7f9fb;
+        }
+        .sidebar-item-active {
+            background-color: #3b82f6; /* Tailwind blue-500 */
+            color: white;
+            font-weight: 600;
+        }
+        .shadow-custom {
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05), 0 4px 6px -2px rgba(0, 0, 0, 0.025);
+        }
+        /* Custom scrollbar for table container */
+        .table-container::-webkit-scrollbar {
+            height: 8px;
+        }
+        .table-container::-webkit-scrollbar-thumb {
+            background-color: #cbd5e1; /* Tailwind gray-300 */
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+
+<script>
+    // --- Data Schema and Initial Data (Moved outside module for global access) ---
+    const tableSchemas = {
+        Patients: ['ID', 'Name', 'Age', 'Gender', 'Contact'],
+        MedicalRecords: ['ID', 'PatientID', 'Diagnosis', 'Treatment'],
+        Doctors: ['ID', 'Name', 'Specialization', 'Schedule'],
+        Appointments: ['ID', 'PatientID', 'DoctorID', 'DateTime', 'Status'],
+        Prescriptions: ['ID', 'PatientID', 'Medicine', 'IssueDate'],
+        Investigations: ['ID', 'PatientID', 'TestType', 'Results'],
+        Billing: ['ID', 'PatientID', 'Amount', 'Status'],
+        InsuranceClaims: ['ID', 'PatientID', 'Status', 'Amount'],
+        SymptomsInput: ['ID', 'PatientID', 'Symptom', 'Date'],
+        DiseasePredictions: ['ID', 'PatientID', 'Disease', 'Confidence'],
+        Recommendations: ['ID', 'PatientID', 'Type', 'Details'],
+        HealthReminders: ['ID', 'PatientID', 'Type', 'NextDate']
+    };
+
+    // MODIFIED: In-Memory Database now starts empty for patient data
+    let dataStore = {
+        Patients: [], // Starts empty
+        Doctors: [
+            { ID: 'D001', Name: 'Dr. Lee', Specialization: 'Cardiology', Schedule: 'Mon-Fri' },
+            { ID: 'D002', Name: 'Dr. Khan', Specialization: 'Pediatrics', Schedule: 'Tue-Sat' }
+        ],
+        Appointments: [], // Starts empty
+        MedicalRecords: [],
+        Prescriptions: [],
+        Investigations: [],
+        Billing: [],
+        InsuranceClaims: [],
+        SymptomsInput: [], // Starts empty
+        DiseasePredictions: [],
+        Recommendations: [],
+        HealthReminders: [] // Starts empty
+    };
+    
+    // --- Role Definitions (Moved outside module for global access) ---
+    const ROLE_MAPPINGS = {
+        // Mocked User ID for Login: [Tables Accessible]
+        'ADMIN': ['Patients', 'MedicalRecords', 'Doctors', 'Appointments', 'Prescriptions', 'Investigations', 'Billing', 'InsuranceClaims', 'SymptomsInput', 'DiseasePredictions', 'Recommendations', 'HealthReminders'],
+        'D000': ['Doctors', 'MedicalRecords', 'Appointments', 'Prescriptions', 'Investigations', 'Recommendations'], // Doctor
+        'P000': ['Patients', 'SymptomsInput', 'HealthReminders'], // Patient
+        'B000': ['Billing', 'InsuranceClaims'] // Billing Admin
+    };
+
+    let currentTable = 'Patients';
+    let editRecordId = null;  
+    window.userRole = 'P000'; // Hard-code the role
+
+</script>
+
+<div id="main-dashboard" class="flex h-screen overflow-hidden">
+
+    <aside id="sidebar" class="w-64 bg-white border-r border-gray-200 p-4 flex-shrink-0 overflow-y-auto">
+        <h2 class="text-xl font-bold mb-6 text-indigo-700">Access Role: <span id="current-user-role" class="font-mono text-blue-600"></span></h2>
+        <h3 class="text-lg font-bold mb-3 text-gray-700">Accessible Features</h3>
+        <nav id="table-list">
+            </nav>
+        <p class="mt-4 text-xs text-gray-500 p-2 border-t pt-4">
+            *CRUD operations are simulated in-memory.
+        </p>
+    </aside>
+
+    <main class="flex-1 overflow-x-hidden overflow-y-auto p-4 md:p-8">
+        <div class="flex justify-between items-center mb-6">
+            <h1 class="text-3xl font-extrabold text-gray-800">
+                Clinical Management Dashboard
+            </h1>
+            </div>
+        <p class="text-gray-500 mb-6">
+            Managing data for the <span id="current-table-title" class="font-semibold text-indigo-600">Patients</span> table.
+        </p>
+
+        <div class="flex flex-col sm:flex-row justify-between items-center gap-4 mb-6 p-4 bg-white rounded-xl shadow-custom border border-gray-100">
+            <div class="flex w-full sm:w-1/2 relative">
+                <input type="text" id="search-input" oninput="handleSearch()" placeholder="Search current table data..."
+                       class="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition duration-150">
+                <span class="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400">
+                    <i data-lucide="search" class="w-5 h-5"></i>
+                </span>
+            </div>
+            <button onclick="showModal('Add')"
+                    class="w-full sm:w-auto flex items-center justify-center px-6 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition duration-150 shadow-md hover:shadow-lg focus:outline-none focus:ring-4 focus:ring-blue-300">
+                <i data-lucide="plus" class="w-5 h-5 mr-2"></i>
+                Add New Record
+            </button>
+        </div>
+
+        <div class="bg-white rounded-xl shadow-custom overflow-hidden">
+            <div class="table-container overflow-x-auto">
+                <table id="data-table" class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50 sticky top-0">
+                        <tr>
+                            </tr>
+                    </thead>
+                    <tbody id="table-body" class="bg-white divide-y divide-gray-200">
+                        </tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+</div>
+
+<div id="modal" class="fixed inset-0 bg-gray-900 bg-opacity-75 hidden items-center justify-center p-4 z-50">
+    <div class="bg-white rounded-xl shadow-2xl w-full max-w-lg p-6 transform transition-all scale-100" onclick="event.stopPropagation()">
+        <div class="flex justify-between items-center border-b pb-3 mb-4">
+            <h3 id="modal-title" class="text-2xl font-bold text-gray-800">Add New Record</h3>
+            <button onclick="hideModal()" class="text-gray-400 hover:text-gray-600">
+                <i data-lucide="x" class="w-6 h-6"></i>
+            </button>
+        </div>
+        <form id="data-form" onsubmit="handleSave(event)">
+            <div id="modal-fields" class="space-y-4 max-h-96 overflow-y-auto pr-2">
+                </div>
+            <div class="mt-6 flex justify-end gap-3">
+                <button type="button" onclick="hideModal()"
+                        class="px-5 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 transition duration-150">
+                    Cancel
+                </button>
+                <button type="submit" id="save-button"
+                        class="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition duration-150 shadow-md">
+                    Save Changes
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+    // --- Utility Functions (Depend on global variables defined above) ---
+
+    /** Generates a short unique ID for simulation */
+    const generateId = (prefix) => prefix + Math.random().toString(36).substring(2, 6).toUpperCase();
+
+    /** MODIFIED: Initializes the dashboard directly for the Patient role */
+    const initializeDashboard = () => {
+        // Hard-code the user role to 'P000' for the patient-specific view
+        // (window.userRole is already set globally, but we confirm it here)
+        window.userRole = 'P000';  
+        
+        // Set the default table to the first one the patient can access
+        const defaultTable = ROLE_MAPPINGS[window.userRole][0]; // Gets 'Patients'
+        currentTable = defaultTable;
+
+        // Update the UI to reflect the role
+        document.getElementById('current-user-role').textContent = window.userRole;
+
+        // Render the sidebar and the default table
+        renderSidebar();
+        loadTable(currentTable);
+        
+        // Initialize icons
+        lucide.createIcons();
+    };
+
+    // --- Authentication Gate Logic ---
+
+    /** REMOVED: window.renderApp()
+     * This function is no longer needed as we are not checking for authentication.
+     * Its logic has been moved into initializeDashboard().
+     */
+
+    // --- Sidebar Logic ---
+
+    /** Renders the list of tables in the sidebar based on the current user's role */
+    const renderSidebar = () => {
+        const tableList = document.getElementById('table-list');
+        tableList.innerHTML = '';
+        
+        const accessibleTables = ROLE_MAPPINGS[window.userRole] || [];
+
+        accessibleTables.forEach(tableName => {
+            const isActive = tableName === currentTable;
+            const button = document.createElement('button');
+            button.className = `w-full text-left p-3 my-1 rounded-lg transition duration-150 hover:bg-gray-100 ${isActive ? 'sidebar-item-active hover:bg-blue-600' : 'text-gray-700'}`;
+            button.textContent = tableName;
+            button.onclick = () => loadTable(tableName);
+            tableList.appendChild(button);
+        });
+        // Rerun Lucide icon rendering after DOM manipulation
+        lucide.createIcons();
+    };
+
+    /** MODIFIED: Switches the dashboard to a new table */
+    window.loadTable = (tableName) => {
+        // Prevent loading a table the current user role doesn't have access to
+        if (!ROLE_MAPPINGS[window.userRole].includes(tableName)) {
+             // Note: alert is blocked, using console error for feedback
+             console.error(`Access Denied: Role ${window.userRole} cannot access the ${tableName} table.`);
+             return;
+        }
+
+        currentTable = tableName;
+        document.getElementById('current-table-title').textContent = tableName;
+        document.getElementById('search-input').value = ''; // Clear search when switching
+        renderSidebar();
+        
+        // --- REMOVED: Logic to hide "Add New Record" button ---
+        // The button is now controlled by the line below
+        
+        document.querySelector('button[onclick="showModal(\'Add\')"]').classList.remove('hidden');
+        
+        renderTable(dataStore[currentTable]);
+    };
+
+    // --- Table Rendering Logic ---
+
+    /** MODIFIED: Renders the header and body of the data table */
+    const renderTable = (data) => {
+        
+        // --- REMOVED: Data filtering logic ---
+        // We now want to show all data
+        let displayData = [...data];
+
+        const schema = tableSchemas[currentTable];
+        const table = document.getElementById('data-table');
+        const thead = table.querySelector('thead tr');
+        const tbody = document.getElementById('table-body');
+
+        // 1. Render Headers
+        thead.innerHTML = '';
+        schema.forEach(attribute => {
+            const th = document.createElement('th');
+            th.className = 'px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider';
+            th.textContent = attribute;
+            thead.appendChild(th);
+        });
+        // Add Action header
+        const actionTh = document.createElement('th');
+        actionTh.className = 'px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider w-36';
+        actionTh.textContent = 'Actions';
+        thead.appendChild(actionTh);
+
+        // 2. Render Body Rows
+        tbody.innerHTML = '';
+        // Use 'displayData' instead of 'data'
+        if (displayData.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="${schema.length + 1}" class="text-center py-8 text-gray-500">No records found for ${currentTable}. Click "Add New Record" to create one.</td></tr>`;
+            return;
+        }
+
+        // Use 'displayData' instead of 'data'
+        displayData.forEach(record => {
+            const row = document.createElement('tr');
+            row.className = 'hover:bg-gray-50';
+
+            schema.forEach(attribute => {
+                const cell = document.createElement('td');
+                cell.className = 'px-6 py-4 whitespace-nowrap text-sm text-gray-700';
+                cell.textContent = record[attribute] !== undefined ? record[attribute] : 'N/A';
+                row.appendChild(cell);
+            });
+
+            // Action Buttons
+            const actionCell = document.createElement('td');
+            actionCell.className = 'px-6 py-4 whitespace-nowrap text-center text-sm font-medium space-x-2';
+
+            // Edit Button
+            const editBtn = document.createElement('button');
+            editBtn.innerHTML = '<i data-lucide="pencil" class="w-4 h-4 text-indigo-500 hover:text-indigo-700"></i>';
+            editBtn.title = 'Edit';
+            editBtn.onclick = () => showModal('Edit', record);
+            editBtn.className = 'inline-flex items-center p-2 rounded-full hover:bg-indigo-50 transition';
+
+            // Delete Button
+            const deleteBtn = document.createElement('button');
+            deleteBtn.innerHTML = '<i data-lucide="trash-2" class="w-4 h-4 text-red-500 hover:text-red-700"></i>';
+            deleteBtn.title = 'Delete';
+            deleteBtn.onclick = () => handleDelete(record.ID);
+            deleteBtn.className = 'inline-flex items-center p-2 rounded-full hover:bg-red-50 transition';
+
+            actionCell.appendChild(editBtn);
+            actionCell.appendChild(deleteBtn);
+            row.appendChild(actionCell);
+            tbody.appendChild(row);
+        });
+        // Rerun Lucide icon rendering
+        lucide.createIcons();
+    };
+
+    // --- CRUD Operations (Simulated) ---
+
+    /** Handles the Search/Filter functionality */
+    window.handleSearch = () => {
+        const query = document.getElementById('search-input').value.toLowerCase();
+        
+        // Start with the full data, not the filtered displayData
+        const allData = dataStore[currentTable];
+        const schema = tableSchemas[currentTable];
+
+        if (!query) {
+            // Re-render with the default (and filtered) view
+            renderTable(allData);
+            return;
+        }
+
+        const filteredData = allData.filter(record => {
+            return schema.some(attribute => {
+                const value = record[attribute];
+                return String(value).toLowerCase().includes(query);
+            });
+        });
+
+        // Render the table with data that is *both* searched and role-filtered
+        renderTable(filteredData);
+    };
+
+    /** * --- MODIFIED: handleSave ---
+     * Handles adding or updating a record.
+     * Includes special logic for adding multiple symptoms from the new modal.
+     */
+    window.handleSave = (event) => {
+        event.preventDefault();
+        const form = event.target;
+
+        // --- MODIFIED LOGIC for SymptomsInput 'Add' mode ---
+        if (currentTable === 'SymptomsInput' && editRecordId === null) {
+            // Get PatientID from the new dropdown
+            const patientId = form.elements['SelectPatient'].value; 
+            const date = form.elements['Date'].value;
+            // Get all dynamically created symptom input fields
+            const symptomInputs = document.querySelectorAll('#dynamic-symptom-list .symptom-input');
+            
+            let symptomsAdded = 0;
+            symptomInputs.forEach(input => {
+                const symptomText = input.value.trim();
+                // Only save if the symptom box is not empty
+                if (symptomText) { 
+                    const newRecord = {
+                        ID: generateId('S'), // 'S' for Symptom
+                        PatientID: patientId, // Use the ID from the dropdown
+                        Symptom: symptomText,
+                        Date: date
+                    };
+                    dataStore.SymptomsInput.push(newRecord);
+                    symptomsAdded++;
+                }
+            });
+            
+            console.log(`Added ${symptomsAdded} new symptoms for Patient ${patientId}`);
+
+        // --- EXISTING LOGIC for all other cases ---
+        } else {
+            const schema = tableSchemas[currentTable];
+            const newRecord = {};
+            let isNew = editRecordId === null; // This will be true for non-symptom 'Add'
+
+            schema.forEach(attr => {
+                // Skip 'NextDate' for HealthReminders, we handle it manually
+                if (currentTable === 'HealthReminders' && attr === 'NextDate') {
+                    return;
+                }
+                // Skip 'PatientID' for HealthReminders, we handle it from the dropdown
+                if (currentTable === 'HealthReminders' && attr === 'PatientID') {
+                    return;
+                }
+                
+                const input = form.elements[attr];
+                if (input) {
+                    // Simple type handling
+                    let value = input.value;
+                    if (attr === 'Age' || attr === 'Amount') {
+                        value = parseFloat(value) || 0;
+                    }
+                    newRecord[attr] = value;
+                }
+            });
+            
+            // --- MODIFIED: Combine date fields and get PatientID for HealthReminders ---
+            if (currentTable === 'HealthReminders') {
+                const year = form.elements['NextDate_Year'].value;
+                const month = form.elements['NextDate_Month'].value;
+                const day = form.elements['NextDate_Day'].value;
+                if (year && month && day) {
+                    newRecord.NextDate = `${year}-${month}-${day}`;
+                }
+                // Get PatientID from the new dropdown
+                newRecord.PatientID = form.elements['SelectPatient'].value;
+            }
+            // --- End of new logic ---
+
+            if (isNew) {
+                // Assign a new unique ID (Primary Key)
+                const idAttr = schema[0];
+                const prefix = currentTable.substring(0, 1);
+                
+                // --- MODIFIED: Always auto-generate the ID ---
+                newRecord[idAttr] = generateId(prefix);
+                
+                dataStore[currentTable].push(newRecord);
+            } else {
+                // Update existing record (this handles 'Edit' for all tables)
+                const index = dataStore[currentTable].findIndex(r => r[schema[0]] === editRecordId);
+                if (index !== -1) {
+                    // Ensure the ID (PK) doesn't change during edit
+                    newRecord[schema[0]] = editRecordId;
+                    dataStore[currentTable][index] = newRecord;
+                }
+            }
+        }
+
+        hideModal();
+        handleSearch(); // Re-render table with current search/no search
+    };
+
+    /** Handles deleting a record */
+    window.handleDelete = (idToDelete) => {
+        // We must replace the browser native 'confirm' since it's forbidden in the instructions
+        // For simplicity in this in-memory mock, we'll log an error as a stand-in for a custom modal:
+        console.error("Deletion confirmation dialog is blocked by security policy. A custom modal would be required here.");
+        // Simulated deletion:
+        const schema = tableSchemas[currentTable];
+        const primaryKey = schema[0];
+        const initialLength = dataStore[currentTable].length;
+
+        dataStore[currentTable] = dataStore[currentTable].filter(record => record[primaryKey] !== idToDelete);
+
+        if (dataStore[currentTable].length < initialLength) {
+            console.log(`[SIMULATED] Record ${idToDelete} deleted successfully.`);
+        } else {
+            console.error(`[SIMULATED] Deletion failed: Record ID ${idToDelete} not found.`);
+        }
+
+        handleSearch(); // Re-render table
+    };
+
+    // --- Modal Logic ---
+
+    /** * --- NEW FUNCTION ---
+     * Dynamically creates symptom input boxes based on dropdown selection.
+     */
+    window.createSymptomBoxes = (count) => {
+        const container = document.getElementById('dynamic-symptom-list');
+        container.innerHTML = ''; // Clear any existing boxes
+        if (count > 0) {
+            for (let i = 1; i <= count; i++) {
+                const input = document.createElement('input');
+                input.type = 'text';
+                input.name = `Symptom_${i}`; // Give a unique name for clarity
+                // Add a class for easy selection in handleSave
+                input.className = 'symptom-input w-full px-3 py-2 border border-gray-300 rounded-lg';
+                input.placeholder = `Symptom #${i}`;
+                if (i === 1) {
+                    input.required = true; // Make at least the first one required
+                }
+                container.appendChild(input);
+            }
+        }
+    };
+
+    /** * --- REMOVED FUNCTION ---
+     * window.fetchPatientName is no longer needed.
+     */
+    // window.fetchPatientName = (patientId) => { ... };
+
+    /** * --- NEW FUNCTION ---
+     * Creates a dropdown <select> element populated with patients from dataStore.
+     */
+    window.createPatientDropdown = (selectedPatientId = '') => {
+        let dropdownHTML = `
+            <div>
+                <label for="SelectPatient" class="text-sm font-medium text-gray-700 mb-1">Select Patient</label>
+                <select id="SelectPatient" name="SelectPatient" 
+                        class="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white focus:ring-blue-500 focus:border-blue-500" required>
+        `;
+        
+        if (dataStore.Patients.length === 0) {
+            dropdownHTML += `<option value="" disabled>No patients found. Add a patient first.</option>`;
+        } else {
+            dropdownHTML += `<option value="">Select a patient...</option>`;
+            dataStore.Patients.forEach(patient => {
+                const selected = patient.ID === selectedPatientId ? 'selected' : '';
+                dropdownHTML += `<option value="${patient.ID}" ${selected}>${patient.Name} (ID: ${patient.ID})</option>`;
+            });
+        }
+        
+        dropdownHTML += `</select></div>`;
+        return dropdownHTML;
+    };
+
+
+    /** * --- MODIFIED: showModal ---
+     * Displays the Add/Edit Modal.
+     * Now has 3 special cases:
+     * 1. SymptomsInput (Add) -> Patient Dropdown + Dynamic symptom boxes
+     * 2. HealthReminders (Add/Edit) -> Patient Dropdown + Day/Month/Year dropdowns
+     * 3. Default (all other) -> Standard form
+     */
+    window.showModal = (mode, record = {}) => {
+        const modal = document.getElementById('modal');
+        const modalTitle = document.getElementById('modal-title');
+        const modalFields = document.getElementById('modal-fields');
+        const saveButton = document.getElementById('save-button');
+        
+        // --- CASE 1: Special form for adding symptoms ---
+        if (currentTable === 'SymptomsInput' && mode === 'Add') {
+            modalTitle.textContent = 'Add New Symptom(s)';
+            saveButton.textContent = 'Save Symptoms';
+            modalFields.innerHTML = '';
+            editRecordId = null; // Ensure we are in 'Add' mode
+            
+            // Create the custom form HTML
+            modalFields.innerHTML = `
+                ${createPatientDropdown()}
+
+                <div>
+                    <label for="Date" class="text-sm font-medium text-gray-700 mb-1">Date</label>
+                    <input type="date" id="Date" name="Date" required 
+                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500" 
+                           value="2025-11-15">
+                </div>
+                
+                <hr class="my-3">
+                
+                <div>
+                    <label for="symptom-count" class="text-sm font-medium text-gray-700 mb-1">How many symptoms do you want to add?</label>
+                    <select id="symptom-count" onchange="createSymptomBoxes(this.value)" 
+                            class="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white focus:ring-blue-500 focus:border-blue-500">
+                        <option value="0">Select a number...</option>
+                        <option value="1">1 Symptom</option>
+                        <option value="2">2 Symptoms</option>
+                        <option value="3">3 Symptoms</option>
+                        <option value="4">4 Symptoms</option>
+                        <option value="5">5 Symptoms</option>
+                    </select>
+                </div>
+                
+                <div id="dynamic-symptom-list" class="space-y-2 mt-2">
+                    </div>
+            `;
+            
+        // --- CASE 2: Special form for HealthReminders (Day/Month/Year) ---
+        } else if (currentTable === 'HealthReminders') {
+            modalTitle.textContent = `${mode} Health Reminder`;
+            saveButton.textContent = mode === 'Add' ? 'Add Record' : 'Save Changes';
+            modalFields.innerHTML = '';
+            editRecordId = mode === 'Edit' ? record.ID : null;
+
+            // Get current values for edit mode
+            const currentID = mode === 'Edit' ? record.ID : 'Auto-Generated';
+            const currentPatientID = mode === 'Edit' ? record.PatientID : ''; 
+            const currentType = mode === 'Edit' ? record.Type : '';
+            const currentDate = mode === 'Edit' ? record.NextDate : ''; // e.g., '2026-01-15'
+
+            let currentYear = '', currentMonth = '', currentDay = '';
+            if (currentDate) {
+                [currentYear, currentMonth, currentDay] = currentDate.split('-');
+            }
+
+            modalFields.innerHTML = `
+                <div>
+                    <label for="ID" class="text-sm font-medium text-gray-700 mb-1">Reminder ID</label>
+                    <input type="text" id="ID" name="ID" value="${currentID}"
+                           class="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-100 text-gray-500 cursor-not-allowed" readonly>
+                </div>
+                
+                ${createPatientDropdown(currentPatientID)}
+
+                <div>
+                    <label for="Type" class="text-sm font-medium text-gray-700 mb-1">Reminder Type</label>
+                    <input type="text" id="Type" name="Type" value="${currentType}"
+                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500" 
+                           placeholder="e.g., Annual Checkup" required>
+                </div>
+                <div>
+                    <label class="text-sm font-medium text-gray-700 mb-1">Next Date</label>
+                    <div class="flex gap-2">
+                        <select id="NextDate_Month" name="NextDate_Month" class="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white focus:ring-blue-500 focus:border-blue-500" required>
+                            <option value="">Month</option>
+                            <option value="01">January</option>
+                            <option value="02">February</option>
+                            <option value="03">March</option>
+                            <option value="04">April</option>
+                            <option value="05">May</option>
+                            <option value="06">June</option>
+                            <option value="07">July</option>
+                            <option value="08">August</option>
+                            <option value="09">September</option>
+                            <option value="10">October</option>
+                            <option value="11">November</option>
+                            <option value="12">December</option>
+                        </select>
+                        <select id="NextDate_Day" name="NextDate_Day" class="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white focus:ring-blue-500 focus:border-blue-500" required>
+                            <option value="">Day</option>
+                        </select>
+                        <select id="NextDate_Year" name="NextDate_Year" class="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white focus:ring-blue-500 focus:border-blue-500" required>
+                            <option value="">Year</option>
+                        </select>
+                    </div>
+                </div>
+            `;
+
+            // Get the select elements
+            const daySelect = modalFields.querySelector('#NextDate_Day');
+            const yearSelect = modalFields.querySelector('#NextDate_Year');
+            const monthSelect = modalFields.querySelector('#NextDate_Month');
+
+            // Populate Day (1-31)
+            for (let i = 1; i <= 31; i++) {
+                const day = String(i).padStart(2, '0');
+                const option = new Option(day, day);
+                if (day === currentDay) option.selected = true;
+                daySelect.add(option);
+            }
+
+            // Populate Year (Current Year to +10)
+            const startYear = new Date().getFullYear(); // 2025
+            for (let i = startYear; i <= startYear + 10; i++) {
+                const year = String(i);
+                const option = new Option(year, year);
+                if (year === currentYear) option.selected = true;
+                yearSelect.add(option);
+            }
+            
+            // Set selected month
+            if (currentMonth) {
+                monthSelect.value = currentMonth;
+            }
+
+        // --- CASE 3: Default form for all other tables/modes ---
+        } else {
+            const schema = tableSchemas[currentTable];
+            modalTitle.textContent = `${mode} ${currentTable} Record`;
+            saveButton.textContent = mode === 'Add' ? 'Add Record' : 'Save Changes';
+            modalFields.innerHTML = '';
+            editRecordId = mode === 'Edit' ? record[schema[0]] : null;
+
+            schema.forEach((attr, index) => {
+                const isPrimaryKey = index === 0;
+                const labelText = attr.replace(/([A-Z])/g, ' $1').trim(); // Convert 'PatientID' to 'Patient ID'
+                const value = record[attr] !== undefined ? record[attr] : '';
+
+                // Input container div
+                const fieldDiv = document.createElement('div');
+                fieldDiv.className = 'flex flex-col';
+
+                // Label
+                const label = document.createElement('label');
+                label.htmlFor = attr;
+                label.className = 'text-sm font-medium text-gray-700 mb-1';
+                label.textContent = labelText;
+                fieldDiv.appendChild(label);
+
+                // Input field
+                const input = document.createElement('input');
+                input.id = attr;
+                input.name = attr;
+                input.value = value;
+                input.required = true; // All fields required
+                
+                // Style and type based on attribute
+                input.className = 'px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition duration-150';
+
+                // --- MODIFIED: Logic for locking fields and setting input types ---
+                if (isPrimaryKey) {
+                    input.readOnly = true;
+                    input.placeholder = mode === 'Add' ? 'Auto-Generated on Save' : value;
+                    input.className += ' bg-gray-100 text-gray-500 cursor-not-allowed';
+                    if (mode === 'Add') {
+                        input.required = false; // Not required since it's auto-generated
+                    }
+                }
+                
+                // NEW: Use datetime-local for 'DateTime'
+                else if (attr === 'DateTime') {
+                    input.type = 'datetime-local';
+                }
+                // NEW: Use date for fields just containing 'Date'
+                else if (attr.includes('Date')) {
+                    input.type = 'date';
+                } 
+                else if (attr === 'Age' || attr === 'Amount') {
+                    input.type = 'number';
+                    input.step = 'any';
+                } else {
+                    input.type = 'text';
+                }
+
+                fieldDiv.appendChild(input);
+                modalFields.appendChild(fieldDiv);
+            });
+        }
+
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+    };
+
+    /** Hides the Add/Edit Modal */
+    window.hideModal = () => {
+        const modal = document.getElementById('modal');
+        modal.classList.add('hidden');
+        modal.classList.remove('flex');
+        editRecordId = null;
+    };
+
+    // Initialize the dashboard when the window loads
+    window.onload = initializeDashboard;
+
+    // Close modal when clicking outside
+    document.getElementById('modal').addEventListener('click', (e) => {
+        if (e.target.id === 'modal') {
+            hideModal();
+        }
+    });
+
+</script>
+
+</body>
+</html>

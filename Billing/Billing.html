@@ -49,10 +49,9 @@
         Appointments: ['ID', 'PatientID', 'DoctorID', 'DateTime', 'Status'],
         Prescriptions: ['ID', 'PatientID', 'Medicine', 'IssueDate'],
         Investigations: ['ID', 'PatientID', 'TestType', 'Results'],
-        // --- MODIFICATION: Added 'PatientName' ---
+        // Schema includes PatientName
         Billing: ['ID', 'PatientID', 'PatientName', 'Amount', 'Status'],
         InsuranceClaims: ['ID', 'PatientID', 'PatientName', 'Status', 'Amount'],
-        // --- END MODIFICATION ---
         SymptomsInput: ['ID', 'PatientID', 'Symptom', 'Date'],
         DiseasePredictions: ['ID', 'PatientID', 'Disease', 'Confidence'],
         Recommendations: ['ID', 'PatientID', 'Type', 'Details'],
@@ -156,10 +155,10 @@
     </div>
 
     <div id="login-form" class="hidden w-full max-w-sm bg-white p-8 rounded-xl shadow-2xl border border-gray-100">
-        <h2 class="text-3xl font-extrabold text-gray-800 text-center mb-6">Role-Based Dashboard Login</h2>
+        <h2 class="text-3xl font-extrabold text-gray-800 text-center mb-6">Dashboard Login</h2>
         <p class="text-sm text-gray-600 mb-4 text-center">Enter your access ID to view features.</p>
         <div class="space-y-4">
-            <input type="text" id="login-id-input" placeholder="Enter Role ID (e.g., D000)" 
+            <input type="text" id="login-id-input" placeholder="Enter ID (e.g., D000)" 
                    class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition duration-150" 
                    value="" required>
             <input type="password" placeholder="Password (ignored)" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition duration-150" value="••••••••" disabled>
@@ -171,12 +170,12 @@
             </button>
         </div>
         <div class="mt-6 p-4 bg-gray-50 rounded-lg text-xs text-gray-700">
-            <p class="font-semibold mb-2">Available Access IDs:</p>
+            <p class="font-semibold mb-2">Available Mock IDs:</p>
             <ul class="list-disc list-inside space-y-1">
-                <li><span class="font-mono text-sm text-blue-600">ADMIN</span>: All Features (12 Tables)</li>
-                <li><span class="font-mono text-sm text-blue-600">D000</span>: Doctor Features (6 Tables)</li>
-                <li><span class="font-mono text-sm text-blue-600">P000</span>: Patient Features (3 Tables)</li>
-                <li><span class="font-mono text-sm text-blue-600">B000</span>: Billing Features (2 Tables)</li>
+                <li><span class="font-mono text-sm text-blue-600">ADMIN</span></li>
+                <li><span class="font-mono text-sm text-blue-600">D000</span></li>
+                <li><span class="font-mono text-sm text-blue-600">P000</span></li>
+                <li><span class="font-mono text-sm text-blue-600">B000</span></li>
             </ul>
         </div>
     </div>
@@ -186,7 +185,9 @@
 <div id="main-dashboard" class="hidden flex h-screen overflow-hidden">
 
     <aside id="sidebar" class="w-64 bg-white border-r border-gray-200 p-4 flex-shrink-0 overflow-y-auto">
-        <h2 class="text-xl font-bold mb-6 text-indigo-700">Access Role: <span id="current-user-role" class="font-mono text-blue-600"></span></h2>
+        <h2 class="text-xl font-bold mb-6 text-indigo-700">
+            Billing Dashboard
+        </h2>
         <h3 class="text-lg font-bold mb-3 text-gray-700">Accessible Features</h3>
         <nav id="table-list">
             </nav>
@@ -328,7 +329,6 @@
                 
                 currentTable = defaultTable; 
                 
-                document.getElementById('current-user-role').textContent = window.userRole;
                 renderSidebar();
                 loadTable(currentTable); 
 
@@ -454,9 +454,10 @@
             statsContainer.classList.remove('hidden');
             
             const outstanding = dataStore.Billing
-                .filter(b => b.Status === 'Pending')
+                .filter(b => b.Status === 'Unpaid') // Filter by 'Unpaid'
                 .reduce((sum, b) => sum + (parseFloat(b.Amount) || 0), 0);
             
+            // For InsuranceClaims, assuming 'Pending' is the status we track
             const pendingClaims = dataStore.InsuranceClaims
                 .filter(c => c.Status === 'Pending' || c.Status === 'Submitted').length;
             
@@ -504,9 +505,22 @@
         const schema = tableSchemas[currentTable];
         const newRecord = {};
         let isNew = editRecordId === null;
+        
+        // Determine the Status field name and its input type (radio group)
+        const isStatusField = schema.includes('Status');
+        const isBillingTable = currentTable === 'Billing';
+
 
         schema.forEach(attr => {
             const input = form.elements[attr];
+            
+            // Special handling for Status radio button group
+            if (attr === 'Status' && isStatusField) {
+                const checkedRadio = form.querySelector('input[name="Status"]:checked');
+                newRecord[attr] = checkedRadio ? checkedRadio.value : '';
+                return;
+            }
+
             if (input) {
                 let value = input.value;
                 if (attr === 'Age' || attr === 'Amount') {
@@ -553,21 +567,6 @@
         renderDashboardStats(currentTable);
     };
 
-    // --- MODIFICATION: New function to auto-fill patient name ---
-    /** Auto-fills the patient name input based on the Patient ID */
-    window.autoFillPatientName = (patientId) => {
-        const nameInput = document.getElementById('PatientName');
-        if (!nameInput) return; // Exit if the field doesn't exist on this modal
-
-        const patient = dataStore.Patients.find(p => p.ID.toLowerCase() === patientId.toLowerCase());
-        
-        if (patient) {
-            nameInput.value = patient.Name;
-        } else {
-            nameInput.value = 'Patient Not Found';
-        }
-    };
-
     // --- Modal Logic ---
 
     /** Displays the Add/Edit Modal */
@@ -582,6 +581,20 @@
         saveButton.textContent = mode === 'Add' ? 'Add Record' : 'Save Changes';
         modalFields.innerHTML = '';
         editRecordId = mode === 'Edit' ? record[schema[0]] : null;
+        
+        // Define radio options based on the current table
+        let statusOptions = [];
+        let defaultStatus = '';
+
+        if (currentTable === 'Billing') {
+            statusOptions = ['Paid', 'Unpaid'];
+            defaultStatus = 'Unpaid';
+        } else if (currentTable === 'InsuranceClaims') {
+            statusOptions = ['Pending', 'Approved', 'Denied'];
+            defaultStatus = 'Pending';
+        }
+        
+        const isStatusField = statusOptions.length > 0 && schema.includes('Status');
 
         schema.forEach((attr, index) => {
             const isPrimaryKey = index === 0;
@@ -597,11 +610,55 @@
             label.textContent = labelText;
             fieldDiv.appendChild(label);
 
+
+            // --- MODIFICATION: Handle Status as Radio Buttons for both Billing and Claims ---
+            if (attr === 'Status' && isStatusField) {
+                const radioContainer = document.createElement('div');
+                radioContainer.className = 'flex items-center space-x-4 p-3 border border-gray-300 rounded-lg';
+                radioContainer.id = `input-${attr}`;
+
+                statusOptions.forEach(option => {
+                    const optionId = `${attr}-${option}`;
+                    
+                    const optionDiv = document.createElement('div');
+                    optionDiv.className = 'flex items-center';
+
+                    const radioInput = document.createElement('input');
+                    radioInput.type = 'radio';
+                    radioInput.id = optionId;
+                    radioInput.name = attr; // Must be the same name for the group
+                    radioInput.value = option;
+                    radioInput.required = true;
+                    radioInput.className = 'h-4 w-4 text-blue-600 border-gray-300 focus:ring-blue-500';
+
+                    // Check the radio button based on the record's value or the default for 'Add' mode
+                    const currentValue = value || defaultStatus;
+
+                    if (currentValue === option) {
+                        radioInput.checked = true;
+                    }
+                    
+                    const radioLabel = document.createElement('label');
+                    radioLabel.htmlFor = optionId;
+                    radioLabel.className = 'ml-2 text-sm text-gray-700 font-medium';
+                    radioLabel.textContent = option;
+
+                    optionDiv.appendChild(radioInput);
+                    optionDiv.appendChild(radioLabel);
+                    radioContainer.appendChild(optionDiv);
+                });
+
+                fieldDiv.appendChild(radioContainer);
+                modalFields.appendChild(fieldDiv);
+                return; // Skip default input creation
+            }
+            // --- END MODIFICATION ---
+
             const input = document.createElement('input');
             input.id = attr;
             input.name = attr;
             input.value = value;
-            input.required = !isPrimaryKey && attr !== 'PatientName'; // PatientName is auto-filled
+            input.required = !isPrimaryKey; 
             input.className = 'px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition duration-150';
 
             if (isPrimaryKey) {
@@ -609,16 +666,10 @@
                 input.placeholder = mode === 'Add' ? 'Auto-Generated on Save' : value;
                 input.className += ' bg-gray-100 text-gray-500 cursor-not-allowed';
             } 
-            // --- MODIFICATION: Add auto-fill logic ---
-            else if (attr === 'PatientID') {
-                input.onblur = () => autoFillPatientName(input.value);
-            } 
             else if (attr === 'PatientName') {
-                input.readOnly = true;
-                input.placeholder = 'Auto-fills after entering Patient ID';
-                input.className += ' bg-gray-100 text-gray-500 cursor-not-allowed';
+                input.type = 'text';
+                input.placeholder = 'Enter patient full name';
             } 
-            // --- END MODIFICATION ---
             else if (attr.includes('Date') || attr.includes('Time')) {
                 input.type = 'text'; 
                 input.placeholder = 'YYYY-MM-DD HH:MM (e.g., 2025-12-01 10:00)';
